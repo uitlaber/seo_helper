@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:core';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart';
 import 'package:http/http.dart' as http;
@@ -40,12 +41,14 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _loading = false;
   late TextEditingController _tagsController;
   late TextEditingController _linksController;
+  late TextEditingController _logsController;
 
   @override
   void dispose() {
     super.dispose();
     _tagsController.dispose();
     _linksController.dispose();
+    _logsController.dispose();
   }
 
   @override
@@ -53,91 +56,111 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     _tagsController = TextEditingController();
     _linksController = TextEditingController();
+    _logsController = TextEditingController();
   }
 
   Future<void> _parseLinks() async {
     setState(() {
       _loading = true;
     });
-    LineSplitter ls = const LineSplitter();
-    List<String> links = ls.convert(_linksController.value.text);
-    List<String> tags = _tagsController.value.text.split(',');
-    var data = [];
 
-    for (var i = 0; i < links.length; i++) {
-      Map<String, dynamic> dataItem = {};
-      dataItem['url'] = links[i];
-      final response = await http.get(Uri.parse(links[i]));
-      for (var c = 0; c < tags.length; c++) {
-        var tag = tags[c].trim();
-        if (tag.isNotEmpty) {
-          var document = parse(response.body);
-          var byAttribute = tag.split('|');
-          if (byAttribute.length > 1) {
-            final text = document
-                .querySelector(byAttribute[0])
-                ?.attributes[byAttribute[1]];
-            dataItem[tags[c]] = text;
-          } else {
-            final text = document.querySelector(tags[c])?.text;
-            dataItem[tags[c]] = text;
+    try {
+      LineSplitter ls = const LineSplitter();
+      List<String> links = ls.convert(_linksController.value.text.trim());
+      List<String> tags = _tagsController.value.text.trim().split(',');
+      var data = [];
+
+      for (var i = 0; i < links.length; i++) {
+        Map<String, dynamic> dataItem = {};
+        dataItem['url'] = links[i];
+        final response = await http.get(Uri.parse(links[i]));
+        for (var c = 0; c < tags.length; c++) {
+          var tag = tags[c].trim();
+          if (tag.isNotEmpty) {
+            var document = parse(response.body);
+            var byAttribute = tag.split('|');
+            if (byAttribute.length > 1) {
+              var text = document
+                  .querySelector(byAttribute[0])
+                  ?.attributes[byAttribute[1]];
+              if (text == null) {
+                _logsController.text +=
+                    '\nНе найден тег или атрибут ${byAttribute[0]} по ссылке ${links[i]}';
+                continue;
+              }
+              dataItem[tags[c]] = text;
+            } else {
+              final text = document.querySelector(tags[c])?.text;
+              if (text == null) {
+                _logsController.text +=
+                    '\nНе найден тег или атрибут ${byAttribute[0]} по ссылке ${links[i]}';
+                continue;
+              }
+              dataItem[tags[c]] = text;
+            }
           }
         }
+        data.add(dataItem);
       }
-      data.add(dataItem);
-    }
 
-    final xlsio.Workbook workbook = xlsio.Workbook();
-    final xlsio.Worksheet sheet = workbook.worksheets[0];
+      final xlsio.Workbook workbook = xlsio.Workbook();
+      final xlsio.Worksheet sheet = workbook.worksheets[0];
 
-    final List<Object> list = [
-      'Toatal Income',
-      20000,
-      'On Date',
-      DateTime(2021, 11, 11)
-    ];
+      int firstRow = 1;
+      const int firstColumn = 1;
+      const bool isVertical = false;
+      sheet.getRangeByIndex(1, 1, 1, 4).autoFitColumns();
 
-    int firstRow = 1;
-    final int firstColumn = 1;
-    final bool isVertical = false;
-    sheet.getRangeByIndex(1, 1, 1, 4).autoFitColumns();
-
-    final List<Object> headers = [];
-    headers.add('url');
-    for (var c = 0; c < tags.length; c++) {
-      headers.add(tags[c]);
-    }
-    sheet.importList(headers, firstRow, firstColumn, isVertical);
-    firstRow++;
-
-    for (var dataItem in data) {
-      final List<Object> list = [];
-      list.add(dataItem['url']);
+      final List<Object> headers = [];
+      headers.add('url');
       for (var c = 0; c < tags.length; c++) {
-        list.add(dataItem[tags[c]]);
+        headers.add(tags[c]);
       }
-      sheet.importList(list, firstRow, firstColumn, isVertical);
+      sheet.importList(headers, firstRow, firstColumn, isVertical);
       firstRow++;
-    }
 
-    final List<int>? bytes = workbook.saveAsStream();
+      for (var dataItem in data) {
+        final List<Object> list = [];
+        list.add(dataItem['url']);
+        for (var c = 0; c < tags.length; c++) {
+          if (dataItem[tags[c]] != null) {
+            list.add(dataItem[tags[c]]);
+          } else {
+            list.add('-');
+          }
+        }
+        sheet.importList(list, firstRow, firstColumn, isVertical);
+        firstRow++;
+      }
 
-    final Directory directory =
-        await path_provider.getApplicationSupportDirectory();
-    final String path = directory.path;
-    var timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    final File file =
-        File(Platform.isWindows ? '$path\\$timestamp.xlsx' : '$path/$timestamp.xlsx');
-    await file.writeAsBytes(bytes!, flush: true);
-    if (Platform.isWindows) {
-      await Process.run('start', <String>['$path\\$timestamp.xlsx'],
-          runInShell: true);
-    } else if (Platform.isMacOS) {
-      await Process.run('open', <String>['$path/$timestamp.xlsx'],
-          runInShell: true);
-    } else if (Platform.isLinux) {
-      await Process.run('xdg-open', <String>['$path/$timestamp.xlsx'],
-          runInShell: true);
+      final List<int>? bytes = workbook.saveAsStream();
+
+      final Directory directory =
+          await path_provider.getApplicationSupportDirectory();
+      final String path = directory.path;
+      var timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final File file = File(Platform.isWindows
+          ? '$path\\$timestamp.xlsx'
+          : '$path/$timestamp.xlsx');
+      await file.writeAsBytes(bytes!, flush: true);
+      if (Platform.isWindows) {
+        await Process.run('start', <String>['$path\\$timestamp.xlsx'],
+            runInShell: true);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', <String>['$path/$timestamp.xlsx'],
+            runInShell: true);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', <String>['$path/$timestamp.xlsx'],
+            runInShell: true);
+      }
+    } catch (e, stacktrace) {
+      if (kDebugMode) {
+        print('Exception: ' + e.toString());
+        print('Stacktrace: ' + stacktrace.toString());
+      }
+      setState(() {
+        _loading = false;
+      });
     }
 
     setState(() {
@@ -159,14 +182,46 @@ class _MyHomePageState extends State<MyHomePage> {
               TextFormField(
                 controller: _linksController,
                 minLines: 6,
+                readOnly: _loading,
                 decoration: const InputDecoration(hintText: 'Введите ссылки'),
                 keyboardType: TextInputType.multiline,
                 maxLines: null,
               ),
               TextFormField(
                 controller: _tagsController,
+                readOnly: _loading,
                 decoration: const InputDecoration(
                     hintText: 'Введите теги через запятую'),
+              ),
+              const SizedBox(
+                height: 30,
+              ),
+              TextFormField(
+                controller: _logsController,
+                minLines: 6,
+                style: const TextStyle(
+                  fontSize: 12
+                ),
+                decoration: const InputDecoration(
+                  contentPadding: EdgeInsets.all(0),
+                  hintText: 'Логи',
+                  fillColor: Colors.transparent,
+                  border: InputBorder.none,
+                  filled: true,
+                ),
+                keyboardType: TextInputType.multiline,
+                maxLines: null,
+              ),
+              const SizedBox(height: 20),
+              TextButton(
+                style: ButtonStyle(
+                  foregroundColor:
+                      MaterialStateProperty.all<Color>(Colors.blue),
+                ),
+                onPressed: () {
+                  _logsController.clear();
+                },
+                child: const Text('Очистить логи'),
               )
             ],
           ),
