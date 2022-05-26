@@ -63,13 +63,11 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _loading = true;
     });
-
     try {
       LineSplitter ls = const LineSplitter();
       List<String> links = ls.convert(_linksController.value.text.trim());
       List<String> tags = _tagsController.value.text.trim().split(',');
       var data = [];
-
       for (var i = 0; i < links.length; i++) {
         Map<String, dynamic> dataItem = {};
         dataItem['url'] = links[i];
@@ -134,7 +132,6 @@ class _MyHomePageState extends State<MyHomePage> {
       }
 
       final List<int>? bytes = workbook.saveAsStream();
-
       final Directory directory =
           await path_provider.getApplicationSupportDirectory();
       final String path = directory.path;
@@ -240,8 +237,6 @@ class _MyHomePageState extends State<MyHomePage> {
               ) // This trailing comma makes auto-formatting nicer for build methods.
         );
   }
-
-  selectFile() {}
 }
 
 @override
